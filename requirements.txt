@@ -1,0 +1,8 @@
+flask
+flask-cors
+pysolr
+nltk
+scikit-learn
+numpy
+requests
+pytest
