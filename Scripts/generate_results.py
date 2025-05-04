@@ -81,12 +81,12 @@ if __name__ == "__main__":
     )
     p.add_argument(
         "--data-json", "-d",
-        default="data.json",
+        default="/Users/vedanshsurjan/Downloads/data2.json",
         help="Path to your crawled data.json"
     )
     p.add_argument(
         "--out", "-o",
-        default="result",
+        default="./result",
         help="Output directory for tfidfVec.pkl and cluster files"
     )
     p.add_argument(

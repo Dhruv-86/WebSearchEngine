@@ -6,7 +6,7 @@ import pysolr
 solr = pysolr.Solr('http://localhost:8983/solr/nutch', always_commit=True)
 
 # load your data.json
-with open('/Users/dhruv/Downloads/data.json', 'r', encoding='utf-8') as f:
+with open('/Users/vedanshsurjan/Downloads/data2.json', 'r', encoding='utf-8') as f:
     data = json.load(f)
 
 docs = []

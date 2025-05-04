@@ -2,7 +2,7 @@
 import os, json
 
 RESULT_DIR = "./result"
-DATA_JSON  = "/Users/dhruv/Downloads/data.json"
+DATA_JSON  = "/Users/vedanshsurjan/Downloads/data2.json"
 
 # Load your docs to get URLs
 with open(DATA_JSON) as f:

@@ -4,9 +4,9 @@ import pytest
 from ClusterManager import ClusterManager
 
 # Adjust these paths to match your layout
-BASE_DIR    = "/Users/dhruv/Downloads"
-DATA_PATH   = os.path.join(BASE_DIR, "data.json")
-RESULTS_DIR = "/Users/dhruv/Desktop/Documents/project/Proooo/Web-SearchEngine/result"
+BASE_DIR    = "/Users/vedanshsurjan/Downloads"
+DATA_PATH   = os.path.join(BASE_DIR, "data2.json")
+RESULTS_DIR = "/Users/vedanshsurjan/IdeaProjects/WebSearchEngine/result"
 
 # Load JSON docs
 with open(DATA_PATH, "r") as f:
