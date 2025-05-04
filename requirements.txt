@@ -6,3 +6,6 @@ scikit-learn
 numpy
 requests
 pytest
+networkx
+pyarrow
+fastparquet

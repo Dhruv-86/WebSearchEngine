@@ -45,7 +45,7 @@ Place your `data.json` (sample of crawled gymnastics pages) anywhere on disk and
 
 8. **Generate TF–IDF & clustering files**
     python scripts/generate_results.py \
-    --data-json ~/Downloads/data.json \
+    --data-json ~/Downloads/data2.json \
     --out ./result \
     --k 10
 
@@ -97,7 +97,7 @@ Place your `data.json` (sample of crawled gymnastics pages) anywhere on disk and
 
 8. **Generate TF–IDF & clustering files**
     python .\scripts\generate_results.py `
-  --data-json C:\Users\you\Downloads\data.json `
+  --data-json C:\Users\you\Downloads\data2.json `
   --out .\result --k 10
 
 9. **Generate relevance‐score JSONs**

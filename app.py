@@ -46,7 +46,7 @@ def limit_domain(docs: list, max_per: int = 4) -> list:
 def fetch_solr(q: str, target: int = 50) -> list:
     rows = 100
     while True:
-        resp = solr.search(q, **{"wt": "json", "rows": rows})
+        resp = solr.search(q, **{"defType": "edismax", "qf": "title^3 content", "wt": "json", "rows": rows})
         docs = []
         for r in resp:
             d = dict(r)

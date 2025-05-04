@@ -1,7 +1,9 @@
 # scripts/index_data.py
 import json
 import pysolr
+import nltk
 
+nltk.download('stopwords', quiet=True)
 # point to your local core
 solr = pysolr.Solr('http://localhost:8983/solr/nutch', always_commit=True)
 
