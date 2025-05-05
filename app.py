@@ -50,7 +50,7 @@ def fetch_solr(q: str, target: int = 50) -> list:
         docs = []
         for r in resp:
             d = dict(r)
-
+            # print(r.get("content"))
             raw_url = r.get("url") or r.get("url_s") or r.get("id") or ""
             url = raw_url[0] if isinstance(raw_url, list) else raw_url
             d["url"] = url
@@ -63,7 +63,7 @@ def fetch_solr(q: str, target: int = 50) -> list:
             d["digest"] = url
 
             docs.append(d)
-
+        # print(f"Searching for query {q} returned {len(docs)} results, trying again with rows={rows}...")
         docs = limit_domain(docs)
         if len(docs) >= target or rows > 10000:
             head, tail = docs[:2], docs[2:]
@@ -79,72 +79,114 @@ def ping():
 def search_endpoint():
     print(">>> /api/v1/search called with args:", request.args)
 
-    raw  = request.args.get("query", "")
-    mode = request.args.get("type", "")
-    if not raw or not mode:
-        return jsonify({"error": "provide both query and type"}), 400
+    # Required parameters
+    raw = request.args.get("query", "")
+    if not raw:
+        return jsonify({"error": "query parameter is required"}), 400
+
+    # Optional parameters with defaults
+    relevance_model = request.args.get("relevance", "default")  # default, page_rank, hits
+    clustering_method = request.args.get("clustering", "none")  # none, flat_clustering, single_hac, average_hac
+    expansion_method = request.args.get("expansion", "none")    # none, rocchio, association_qe, metric_qe, scalar_qe
 
     # 1) Preprocess & initial fetch
-    cq     = clean_query(raw)
+    cq = clean_query(raw)
     solr_q = f'content:"{cq}"'
     results = fetch_solr(solr_q)
 
-    # 2) Relevance re-ranking
-    if mode in ("page_rank", "hits"):
-        scores_path = os.path.join(RESULTS_DIR, f"{mode}_scores.json")
-        with open(scores_path) as f:
-            scores = json.load(f)
-        results = sorted(
-            results,
-            key=lambda d: scores.get(d["url"], 0),
-            reverse=True
-        )
+    # For debugging
+    print(f"Initial fetch returned {len(results)} results")
 
-    # 3) Clustering
-    if mode == "flat_clustering":
-        results = cluster_mgr.cluster_flat(raw, results)
-    elif mode == "single_hac":
-        results = cluster_mgr.cluster_single(raw, results)
-    elif mode == "average_hac":
-        results = cluster_mgr.cluster_average(raw, results)
-
-    # 4) Query Expansion with robust fallback
-    resp_q = raw
-
-    if mode == "rocchio":
-        ext = qe.rocchio_expand(raw, results)
-        newr = fetch_solr(f'content:"{ext}"')
-        results = newr or results
-        resp_q  = ext or raw
-
-    elif mode == "association_qe":
+    # 2) Apply relevance re-ranking if specified
+    if relevance_model in ("page_rank", "hits"):
         try:
-            ext = qe.association_main(raw, results)
+            scores_path = os.path.join(RESULTS_DIR, f"{relevance_model}_scores.json")
+            with open(scores_path) as f:
+                scores = json.load(f)
+            results = sorted(
+                results,
+                key=lambda d: scores.get(d["url"], 0),
+                reverse=True
+            )
+            print(f"Applied {relevance_model} relevance model")
         except Exception as e:
-            print("association_qe error:", e)
-            ext = ""
-        if ext:
-            newr = fetch_solr(f'content:"{ext}"')
-            results = newr or results
-            resp_q = ext
-        # if ext empty, leave results & resp_q==raw
+            print(f"Error applying {relevance_model}: {e}")
 
-    elif mode == "metric_qe":
-        ext = qe.metric_cluster_main(raw, results)
-        newr = fetch_solr(f'content:"{ext}"')
-        results = newr or results
-        resp_q  = ext or raw
+    # 3) Apply clustering if specified
+    if clustering_method == "flat_clustering":
+        try:
+            results = cluster_mgr.cluster_flat(raw, results)
+            print("Applied flat clustering")
+        except Exception as e:
+            print(f"Error applying flat clustering: {e}")
+    elif clustering_method == "single_hac":
+        try:
+            results = cluster_mgr.cluster_single(raw, results)
+            print("Applied single-link HAC")
+        except Exception as e:
+            print(f"Error applying single-link HAC: {e}")
+    elif clustering_method == "average_hac":
+        try:
+            results = cluster_mgr.cluster_average(raw, results)
+            print("Applied average-link HAC")
+        except Exception as e:
+            print(f"Error applying average-link HAC: {e}")
 
-    elif mode == "scalar_qe":
-        ext = qe.scalar_main(raw, results)
-        newr = fetch_solr(f'content:"{ext}"')
-        results = newr or results
-        resp_q  = ext or raw
+    # 4) Apply query expansion if specified
+    resp_q = raw
+    ext = ""
+    if expansion_method != "none":
+        try:
+            if expansion_method == "rocchio":
+                ext = qe.rocchio_expand(raw, results)
+                print(f"Rocchio expansion: '{ext}'")
+            elif expansion_method == "association_qe":
+                ext = qe.association_main(raw, results)
+                print(f"Association QE: '{ext}'")
+            elif expansion_method == "metric_qe":
+                ext = qe.metric_cluster_main(raw, results)
+                print(f"Metric QE: '{ext}'")
+            elif expansion_method == "scalar_qe":
+                ext = qe.scalar_main(raw, results)
+                print(f"Scalar QE: '{ext}'")
 
-    return jsonify({
-        "query": resp_q,
-        "query_results": results
-    })
+            if ext:
+                # Combine original query with expansion terms
+                combined_query = f"{raw} {ext}"
+                expanded_solr_query = f'content:"{combined_query}"'
+
+                # Store both the original and expanded queries
+                original_query = raw
+                expanded_query = combined_query
+                print(f"Combined query: '{expanded_solr_query}'")
+                newr = fetch_solr(expanded_solr_query)
+                print(f"Expansion query returned {len(newr)} results")
+                if newr:
+                    results = newr
+                    resp_q = expanded_query  # Use the combined query
+                else:
+                    print("No results from expansion query, using original results")
+            else:
+                print("Expansion returned empty string, using original results")
+        except Exception as e:
+            print(f"Error in {expansion_method}: {e}")
+
+    # Enhance the response with both original and expanded queries
+    response_data = {
+        "query": resp_q + ext,
+        "query_results": results,
+        "applied_methods": {
+            "relevance": relevance_model,
+            "clustering": clustering_method,
+            "expansion": expansion_method
+        }
+    }
+
+    # Add original_query field if query expansion was applied
+    if expansion_method != "none" and resp_q != raw:
+        response_data["original_query"] = raw
+
+    return jsonify(response_data)
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
