@@ -88,6 +88,7 @@ def search_endpoint():
     relevance_model = request.args.get("relevance", "default")  # default, page_rank, hits
     clustering_method = request.args.get("clustering", "none")  # none, flat_clustering, single_hac, average_hac
     expansion_method = request.args.get("expansion", "none")    # none, rocchio, association_qe, metric_qe, scalar_qe
+    use_hybrid = request.args.get("hybrid", "true").lower() == "true"  # Whether to use hybrid scoring with vector space
 
     # 1) Preprocess & initial fetch
     cq = clean_query(raw)
@@ -100,15 +101,86 @@ def search_endpoint():
     # 2) Apply relevance re-ranking if specified
     if relevance_model in ("page_rank", "hits"):
         try:
+            # Load the primary relevance scores (PageRank or HITS)
             scores_path = os.path.join(RESULTS_DIR, f"{relevance_model}_scores.json")
             with open(scores_path) as f:
-                scores = json.load(f)
-            results = sorted(
-                results,
-                key=lambda d: scores.get(d["url"], 0),
-                reverse=True
-            )
-            print(f"Applied {relevance_model} relevance model")
+                primary_scores = json.load(f)
+
+            # If hybrid scoring is enabled, also load vector space scores
+            if use_hybrid:
+                try:
+                    vs_scores_path = os.path.join(RESULTS_DIR, "vector_space_scores.json")
+                    with open(vs_scores_path) as f:
+                        vector_space_scores = json.load(f)
+
+                    # Get URLs of top documents from initial results
+                    top_docs = [doc["url"] for doc in results[:10] if "url" in doc]  # Adjust number as needed
+
+                    # Create a scoring dictionary
+                    doc_scores = {}
+
+                    # Initialize scores with a small value
+                    for doc in results:
+                        if "url" in doc:
+                            doc_scores[doc["url"]] = 0.0001
+
+                    # Apply scoring based on the relevance model
+                    if relevance_model == "page_rank":
+                        print("Page Rank with Vector Space")
+
+                        # For each document in our results
+                        for doc in results:
+                            if "url" in doc:
+                                doc_id = doc["url"]
+                                # Start with 70% of the current score
+                                doc_scores[doc_id] = 0.7 * doc_scores.get(doc_id, 0)
+                                # Add 40% of the PageRank score
+                                doc_scores[doc_id] += 0.4 * primary_scores.get(doc_id, 0)
+
+                    elif relevance_model == "hits":
+                        print("Hit Algorithm with Vector Space")
+
+                        # For each document in our results
+                        for doc in results:
+                            if "url" in doc:
+                                doc_id = doc["url"]
+                                # Start with 70% of the current score
+                                doc_scores[doc_id] = 0.7 * doc_scores.get(doc_id, 0)
+                                # Add 20% of the authority score
+                                doc_scores[doc_id] += 0.2 * primary_scores.get(doc_id, 0)
+
+                    # Now add vector space component for all documents
+                    for doc_id in doc_scores:
+                        # For each top document, check if this doc is similar to it
+                        for top_doc in top_docs:
+                            if top_doc in vector_space_scores and doc_id in vector_space_scores[top_doc]:
+                                # Add the similarity score
+                                doc_scores[doc_id] += 0.3 * vector_space_scores[top_doc][doc_id]
+
+                    # Sort results by the combined score
+                    results = sorted(
+                        results,
+                        key=lambda d: doc_scores.get(d.get("url", ""), 0),
+                        reverse=True
+                    )
+                    print(f"Applied hybrid scoring ({relevance_model} + vector space)")
+                except Exception as e:
+                    print(f"Error applying hybrid scoring: {e}")
+                    # Fallback to just primary scores
+                    results = sorted(
+                        results,
+                        key=lambda d: primary_scores.get(d.get("url", ""), 0),
+                        reverse=True
+                    )
+                    print(f"Applied {relevance_model} relevance model (fallback)")
+            else:
+                # Just use primary scores if hybrid is disabled
+                results = sorted(
+                    results,
+                    key=lambda d: primary_scores.get(d.get("url", ""), 0),
+                    reverse=True
+                )
+                print(f"Applied {relevance_model} relevance model")
         except Exception as e:
             print(f"Error applying {relevance_model}: {e}")
 
@@ -153,15 +225,82 @@ def search_endpoint():
             if ext:
                 # Combine original query with expansion terms
                 combined_query = f"{raw} {ext}"
-                expanded_solr_query = f'content:"{combined_query}"'
+
+                # Build a better Solr query that searches for each term individually
+                all_terms = combined_query.split()
+                expanded_solr_query = " ".join([f'content:"{term}"' for term in all_terms])
+                print(f"Constructed Solr query: {expanded_solr_query}")
 
                 # Store both the original and expanded queries
                 original_query = raw
                 expanded_query = combined_query
-                print(f"Combined query: '{expanded_solr_query}'")
+
                 newr = fetch_solr(expanded_solr_query)
                 print(f"Expansion query returned {len(newr)} results")
+
                 if newr:
+                    # If we're using hybrid scoring, reapply it to the new results
+                    if relevance_model in ("page_rank", "hits") and use_hybrid:
+                        try:
+                            # Load scores again (or reuse from above)
+                            scores_path = os.path.join(RESULTS_DIR, f"{relevance_model}_scores.json")
+                            with open(scores_path) as f:
+                                primary_scores = json.load(f)
+
+                            vs_scores_path = os.path.join(RESULTS_DIR, "vector_space_scores.json")
+                            with open(vs_scores_path) as f:
+                                vector_space_scores = json.load(f)
+
+                            # Get URLs of top documents from new results
+                            top_docs = [doc["url"] for doc in newr[:10] if "url" in doc]
+
+                            # Create a scoring dictionary
+                            doc_scores = {}
+
+                            # Initialize scores with a small value
+                            for doc in newr:
+                                if "url" in doc:
+                                    doc_scores[doc["url"]] = 0.0001
+
+                            # Apply scoring based on the relevance model
+                            if relevance_model == "page_rank":
+                                # For each document in our results
+                                for doc in newr:
+                                    if "url" in doc:
+                                        doc_id = doc["url"]
+                                        # Start with 70% of the current score
+                                        doc_scores[doc_id] = 0.7 * doc_scores.get(doc_id, 0)
+                                        # Add 40% of the PageRank score
+                                        doc_scores[doc_id] += 0.4 * primary_scores.get(doc_id, 0)
+
+                            elif relevance_model == "hits":
+                                # For each document in our results
+                                for doc in newr:
+                                    if "url" in doc:
+                                        doc_id = doc["url"]
+                                        # Start with 70% of the current score
+                                        doc_scores[doc_id] = 0.7 * doc_scores.get(doc_id, 0)
+                                        # Add 20% of the authority score
+                                        doc_scores[doc_id] += 0.2 * primary_scores.get(doc_id, 0)
+
+                            # Now add vector space component for all documents
+                            for doc_id in doc_scores:
+                                # For each top document, check if this doc is similar to it
+                                for top_doc in top_docs:
+                                    if top_doc in vector_space_scores and doc_id in vector_space_scores[top_doc]:
+                                        # Add the similarity score
+                                        doc_scores[doc_id] += 0.3 * vector_space_scores[top_doc][doc_id]
+
+                            # Sort results by the combined score
+                            newr = sorted(
+                                newr,
+                                key=lambda d: doc_scores.get(d.get("url", ""), 0),
+                                reverse=True
+                            )
+                            print(f"Reapplied hybrid scoring to expanded results")
+                        except Exception as e:
+                            print(f"Error reapplying hybrid scoring: {e}")
+
                     results = newr
                     resp_q = expanded_query  # Use the combined query
                 else:
@@ -173,18 +312,20 @@ def search_endpoint():
 
     # Enhance the response with both original and expanded queries
     response_data = {
-        "query": resp_q + ext,
+        "query": resp_q,
         "query_results": results,
         "applied_methods": {
             "relevance": relevance_model,
             "clustering": clustering_method,
-            "expansion": expansion_method
+            "expansion": expansion_method,
+            "hybrid": str(use_hybrid).lower()
         }
     }
 
     # Add original_query field if query expansion was applied
-    if expansion_method != "none" and resp_q != raw:
+    if expansion_method != "none" and ext:
         response_data["original_query"] = raw
+        response_data["expanded_terms"] = ext
 
     return jsonify(response_data)
 
