@@ -12,14 +12,25 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 def main(data_json, result_dir, k):
     os.makedirs(result_dir, exist_ok=True)
 
-    # 1) Load your data.json
+    # 1) Load your output.json - now a direct list of documents
     with open(data_json, 'r', encoding='utf-8') as f:
-        payload = json.load(f)
-    docs = payload.get("response", {}).get("docs", [])
+        docs = json.load(f)
 
     # 2) Build URL & text lists
-    urls  = [d["url"] for d in docs]
-    texts = [ (d.get("title","") + " " + d.get("content","")).strip() for d in docs ]
+    urls = [d["url"] for d in docs]
+
+    # Create text content for each document
+    # If content is empty, use an empty string
+    texts = []
+    for d in docs:
+        # Extract a title from the first 50 chars of content if not explicitly provided
+        title = ""
+        if d.get("content"):
+            title = d.get("content", "")[:50].strip() + "..."
+
+        # Combine title and content
+        text = (title + " " + d.get("content", "")).strip()
+        texts.append(text)
 
     # 3) TF–IDF vectorization
     print("Vectorizing texts with TF–IDF...")
@@ -81,8 +92,8 @@ if __name__ == "__main__":
     )
     p.add_argument(
         "--data-json", "-d",
-        default="/Users/vedanshsurjan/Downloads/data2.json",
-        help="Path to your crawled data.json"
+        default="/Users/vedanshsurjan/Downloads/output.json",
+        help="Path to your crawled output.json"
     )
     p.add_argument(
         "--out", "-o",
